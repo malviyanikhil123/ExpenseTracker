@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+
+# Coverage
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Cache
+.cache/
+.eslintcache
+
+# Test reports
+test-results/
+playwright-report/
+
+# Package manager
+.pnpm-store/
+.npm/
+
+# Docker
+docker-compose.override.yml
+
+# Fastify uploads (if used)
+uploads/
+
+# Prisma (optional)
+prisma/dev.db
+prisma/dev.db-journal
+
+# Generated files
+*.pid
+*.seed
+*.pid.lock
