@@ -48,7 +48,7 @@
       "reactCompiler": true
     },
     "extra": {
-      "apiUrl": "https://expensetracker-t0jg.onrender.com/api/api",
+      "apiUrl": "https://expensetracker-t0jg.onrender.com/api",
       "router": {},
       "eas": {
         "projectId": "499f7680-0db6-4bf1-9de4-265e4482a478"
