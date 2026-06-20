@@ -64,14 +64,14 @@ function DebtCard({ item, index, onOpen }: { item: Debt; index: number; onOpen: 
   return (
     <Reanimated.View
       entering={FadeInDown.delay(100 + index * 40).duration(400)}
-      style={[animatedStyle, { marginBottom: 10 }]}
+      style={{ marginBottom: 10 }}
     >
       <Pressable
         onPress={onOpen}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
-        <Surface style={[styles.itemCard, { marginBottom: 0 }]} elevation={0}>
+        <Reanimated.View style={[styles.itemCard, animatedStyle, { marginBottom: 0 }]}>
           <View style={[styles.iconCircle, { backgroundColor: `${color}15` }]}>
             <MaterialCommunityIcons
               name={isRepaid ? "check-circle-outline" : isLend ? "hand-pointing-right" : "hand-pointing-left"}
@@ -109,7 +109,7 @@ function DebtCard({ item, index, onOpen }: { item: Debt; index: number; onOpen: 
               )}
             </View>
           </View>
-        </Surface>
+        </Reanimated.View>
       </Pressable>
     </Reanimated.View>
   );

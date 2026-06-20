@@ -62,13 +62,13 @@ function AccountCard({ account, count, index }: { account: any; count: number; i
   return (
     <Reanimated.View
       entering={FadeInDown.delay(100 * index).duration(400)}
-      style={[animatedStyle, { marginBottom: 10 }]}
+      style={{ marginBottom: 10 }}
     >
       <Pressable
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
-        <Surface style={[styles.card, styles.account, { marginBottom: 0 }]} elevation={0}>
+        <Reanimated.View style={[styles.card, styles.account, animatedStyle, { marginBottom: 0 }]}>
           <View>
             <Text variant="titleMedium" style={[styles.bold, { color: palette.text }]}>{account.name}</Text>
             <Text style={styles.muted}>{count} transactions this month</Text>
@@ -76,7 +76,7 @@ function AccountCard({ account, count, index }: { account: any; count: number; i
           <Text variant="titleMedium" style={{ color: palette.primary, fontWeight: '700' }}>
             {currency(account.balance)}
           </Text>
-        </Surface>
+        </Reanimated.View>
       </Pressable>
     </Reanimated.View>
   );

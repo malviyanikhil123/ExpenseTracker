@@ -5,8 +5,8 @@ import { useAuthStore } from '@/stores/auth-store';
 import type { AuthResponse } from '@/types';
 
 export const API_BASE_URL =
-  Constants.expoConfig?.extra?.apiUrl ??
   process.env.EXPO_PUBLIC_API_URL ??
+  Constants.expoConfig?.extra?.apiUrl ??
   'http://10.0.2.2:15000/api';
 
 export const api = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });

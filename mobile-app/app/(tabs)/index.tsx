@@ -2,7 +2,7 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState, useEffect } from "react";
-import { Pressable, StyleSheet, View, Linking, Platform } from "react-native";
+import { Pressable, StyleSheet, View, Linking, Platform, ScrollView } from "react-native";
 import { useCustomAlert } from "@/components/custom-dialogs";
 import { Surface, Text } from "react-native-paper";
 import Reanimated, {
@@ -139,9 +139,36 @@ export default function HomeScreen() {
     }, [queryClient])
   );
 
+  const [activeFilter, setActiveFilter] = useState<"all" | "expense" | "income" | "lent" | "borrowed">("expense");
+
   const items = transactions.data?.items;
+  const filteredItems = useMemo(() => {
+    return (items ?? []).filter((item) => {
+      if (activeFilter === "all") return true;
+      if (activeFilter === "expense") {
+        return item.type === "expense" && !item.isDebt && !item.isRepayment;
+      }
+      if (activeFilter === "income") {
+        return item.type === "income" && !item.isDebt && !item.isRepayment;
+      }
+      if (activeFilter === "lent") {
+        return (
+          (item.isDebt && item.category?.name === "Lend") ||
+          (item.isRepayment && item.category?.name === "Lend Repayment")
+        );
+      }
+      if (activeFilter === "borrowed") {
+        return (
+          (item.isDebt && item.category?.name === "Borrow") ||
+          (item.isRepayment && item.category?.name === "Borrow Repayment")
+        );
+      }
+      return true;
+    });
+  }, [items, activeFilter]);
+
   const grouped = useMemo(() => {
-    return (items ?? []).reduce<Record<string, Transaction[]>>(
+    return filteredItems.reduce<Record<string, Transaction[]>>(
       (result, item) => {
         const key = dayKey(item.transactionDate);
         (result[key] ??= []).push(item);
@@ -149,7 +176,7 @@ export default function HomeScreen() {
       },
       {},
     );
-  }, [items]);
+  }, [filteredItems]);
 
   const totalBalance = useMemo(() => {
     return (accounts.data ?? []).reduce((sum, acc) => sum + Number(acc.balance), 0);
@@ -291,12 +318,51 @@ export default function HomeScreen() {
         </Pressable>
       </Reanimated.View>
 
+      {/* Transaction Filters */}
+      <View style={styles.filterContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterScroll}
+        >
+          {([
+            { id: "all", label: "All" },
+            { id: "expense", label: "Expenses" },
+            { id: "income", label: "Income" },
+            { id: "lent", label: "Lent" },
+            { id: "borrowed", label: "Borrowed" },
+          ] as const).map((filter) => {
+            const isActive = activeFilter === filter.id;
+            return (
+              <Pressable
+                key={filter.id}
+                onPress={() => setActiveFilter(filter.id)}
+                style={({ pressed }) => [
+                  styles.filterButton,
+                  isActive && styles.filterButtonActive,
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.filterLabel,
+                    isActive && styles.filterLabelActive,
+                  ]}
+                >
+                  {filter.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       <View style={styles.sectionTitle}>
         <Text variant="titleLarge" style={[styles.bold, { color: palette.text }]}>
           Transactions
         </Text>
         <Text style={styles.muted}>
-          {transactions.data?.total ?? 0} this month
+          {filteredItems.length} found
         </Text>
       </View>
       {transactions.isLoading ? (
@@ -443,5 +509,40 @@ const styles = StyleSheet.create({
     color: palette.primary,
     fontSize: 12,
     fontWeight: "700",
+  },
+  filterContainer: {
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  filterScroll: {
+    gap: 8,
+    paddingRight: 16,
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: palette.card,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+    minWidth: 70,
+    alignItems: "center",
+  },
+  filterButtonActive: {
+    backgroundColor: palette.primary,
+    borderColor: palette.primary,
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  filterLabel: {
+    color: palette.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  filterLabelActive: {
+    color: palette.textDark,
   },
 });
