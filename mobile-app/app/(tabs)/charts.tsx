@@ -1,15 +1,21 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { FAB, Surface, Text } from "react-native-paper";
+import { Surface, Text } from "react-native-paper";
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  FadeInDown,
+} from "react-native-reanimated";
 
 import {
   useCategoryAnalytics,
   useMonthlyAnalytics,
   useTransactions,
 } from "@/api/queries";
-import { EmptyState, LoadingState, PageHeader } from "@/components/finance-ui";
+import { EmptyState, LoadingState, PageHeader, FloatingFAB } from "@/components/finance-ui";
 import { Screen } from "@/components/screen";
 import { palette } from "@/constants/app-theme";
 import { currency } from "@/lib/format";
@@ -37,9 +43,8 @@ function getWeekNumber(date: Date): number {
 
 /** Get human-friendly week label like "Jun 2 – Jun 8" */
 function weekLabel(weekNum: number, year: number): string {
-  // Find the Monday of this ISO week
   const jan4 = new Date(year, 0, 4);
-  const dayOfWeek = jan4.getDay() || 7; // Mon=1 ... Sun=7
+  const dayOfWeek = jan4.getDay() || 7;
   const monday = new Date(jan4);
   monday.setDate(jan4.getDate() - dayOfWeek + 1 + (weekNum - 1) * 7);
   const sunday = new Date(monday);
@@ -47,6 +52,34 @@ function weekLabel(weekNum: number, year: number): string {
   const fmt = (d: Date) =>
     d.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
   return `${fmt(monday)} – ${fmt(sunday)}`;
+}
+
+/* ─── Micro-interaction components ─── */
+
+function AnimatedBar({ targetHeight, color }: { targetHeight: number; color: string }) {
+  const heightShared = useSharedValue(0);
+  useEffect(() => {
+    heightShared.value = withTiming(targetHeight, { duration: 600 });
+  }, [targetHeight, heightShared]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: heightShared.value,
+  }));
+
+  return <Reanimated.View style={[styles.bar, animatedStyle, { backgroundColor: color }]} />;
+}
+
+function AnimatedProgressBar({ percent, color }: { percent: number; color: string }) {
+  const widthShared = useSharedValue(0);
+  useEffect(() => {
+    widthShared.value = withTiming(percent, { duration: 600 });
+  }, [percent, widthShared]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: `${widthShared.value}%`,
+  }));
+
+  return <Reanimated.View style={[styles.fill, animatedStyle, { backgroundColor: color }]} />;
 }
 
 /* ─── Weekly view ─── */
@@ -88,65 +121,47 @@ function WeeklyView() {
       <Text variant="titleLarge" style={styles.heading}>
         Weekly spending
       </Text>
-      <Surface style={styles.card} elevation={0}>
-        {weeklyData.map((w) => {
-          const pct = totalExpense ? (w.expense / totalExpense) * 100 : 0;
-          return (
-            <View key={w.week} style={styles.category}>
-              <View style={styles.row}>
-                <Text style={{ flex: 1, color: palette.text }}>
-                  {weekLabel(w.week, year)}
-                </Text>
-                <Text style={{ color: palette.text }}>{currency(w.expense)}</Text>
+      <Reanimated.View entering={FadeInDown.delay(100).duration(400)}>
+        <Surface style={styles.card} elevation={0}>
+          {weeklyData.map((w) => {
+            const pct = totalExpense ? (w.expense / totalExpense) * 100 : 0;
+            return (
+              <View key={w.week} style={styles.category}>
+                <View style={styles.row}>
+                  <Text style={{ flex: 1, color: palette.text, fontWeight: '500' }}>
+                    {weekLabel(w.week, year)}
+                  </Text>
+                  <Text style={{ color: palette.text, fontWeight: '700' }}>{currency(w.expense)}</Text>
+                </View>
+                <View style={styles.track}>
+                  <AnimatedProgressBar percent={pct} color={palette.expense} />
+                </View>
               </View>
-              <View style={styles.track}>
-                <View
-                  style={[
-                    styles.fill,
-                    {
-                      width: `${pct}%`,
-                      backgroundColor: palette.expense,
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-          );
-        })}
-      </Surface>
+            );
+          })}
+        </Surface>
+      </Reanimated.View>
+
       <Text variant="titleLarge" style={styles.heading}>
         Weekly comparison
       </Text>
-      <Surface style={[styles.card, styles.chart]} elevation={0}>
-        {weeklyData.map((w) => (
-          <View key={w.week} style={styles.barColumn}>
-            <View style={styles.bars}>
-              <View
-                style={[
-                  styles.bar,
-                  {
-                    height: Math.max(4, (w.income / maxVal) * 130),
-                    backgroundColor: palette.income,
-                  },
-                ]}
-              />
-              <View
-                style={[
-                  styles.bar,
-                  {
-                    height: Math.max(4, (w.expense / maxVal) * 130),
-                    backgroundColor: palette.expense,
-                  },
-                ]}
-              />
+      <Reanimated.View entering={FadeInDown.delay(200).duration(400)}>
+        <Surface style={[styles.card, styles.chart]} elevation={0}>
+          {weeklyData.map((w) => (
+            <View key={w.week} style={styles.barColumn}>
+              <View style={styles.bars}>
+                <AnimatedBar targetHeight={Math.max(4, (w.income / maxVal) * 130)} color={palette.income} />
+                <AnimatedBar targetHeight={Math.max(4, (w.expense / maxVal) * 130)} color={palette.expense} />
+              </View>
+              <Text style={styles.month}>W{w.week}</Text>
             </View>
-            <Text style={styles.month}>W{w.week}</Text>
-          </View>
-        ))}
-      </Surface>
+          ))}
+        </Surface>
+      </Reanimated.View>
+
       <View style={styles.legend}>
-        <Text style={{ color: palette.income }}>● Income</Text>
-        <Text style={{ color: palette.expense }}>● Expense</Text>
+        <Text style={{ color: palette.income, fontWeight: '600' }}>● Income</Text>
+        <Text style={{ color: palette.expense, fontWeight: '600' }}>● Expense</Text>
       </View>
     </>
   );
@@ -171,70 +186,55 @@ function MonthlyView() {
       <Text variant="titleLarge" style={styles.heading}>
         Expense breakdown
       </Text>
-      <Surface style={styles.card} elevation={0}>
-        {categories.data?.length ? (
-          categories.data.map((item) => {
-            const percent = total ? (Number(item.total) / total) * 100 : 0;
-            return (
-              <View key={item.categoryId} style={styles.category}>
-                <View style={styles.row}>
-                  <Text style={{ color: palette.text }}>{item.name}</Text>
-                  <Text style={{ color: palette.textSecondary }}>
-                    {percent.toFixed(0)}% · {currency(item.total)}
-                  </Text>
+      <Reanimated.View entering={FadeInDown.delay(100).duration(400)}>
+        <Surface style={styles.card} elevation={0}>
+          {categories.data?.length ? (
+            categories.data.map((item) => {
+              const percent = total ? (Number(item.total) / total) * 100 : 0;
+              return (
+                <View key={item.categoryId} style={styles.category}>
+                  <View style={styles.row}>
+                    <Text style={{ color: palette.text, fontWeight: '500' }}>{item.name}</Text>
+                    <Text style={{ color: palette.textSecondary, fontWeight: '600' }}>
+                      {percent.toFixed(0)}% · {currency(item.total)}
+                    </Text>
+                  </View>
+                  <View style={styles.track}>
+                    <AnimatedProgressBar percent={percent} color={item.color || palette.primary} />
+                  </View>
                 </View>
-                <View style={styles.track}>
-                  <View
-                    style={[
-                      styles.fill,
-                      { width: `${percent}%`, backgroundColor: item.color },
-                    ]}
-                  />
-                </View>
-              </View>
-            );
-          })
-        ) : (
-          <EmptyState text="No expense data for this month." />
-        )}
-      </Surface>
+              );
+            })
+          ) : (
+            <EmptyState text="No expense data for this month." />
+          )}
+        </Surface>
+      </Reanimated.View>
+
       <Text variant="titleLarge" style={styles.heading}>
         Monthly trend
       </Text>
-      <Surface style={[styles.card, styles.chart]} elevation={0}>
-        {(monthly.data ?? []).map((item) => (
-          <View key={item.month} style={styles.barColumn}>
-            <View style={styles.bars}>
-              <View
-                style={[
-                  styles.bar,
-                  {
-                    height: Math.max(4, (item.income / maxMonth) * 130),
-                    backgroundColor: palette.income,
-                  },
-                ]}
-              />
-              <View
-                style={[
-                  styles.bar,
-                  {
-                    height: Math.max(4, (item.expense / maxMonth) * 130),
-                    backgroundColor: palette.expense,
-                  },
-                ]}
-              />
+      <Reanimated.View entering={FadeInDown.delay(200).duration(400)}>
+        <Surface style={[styles.card, styles.chart]} elevation={0}>
+          {(monthly.data ?? []).map((item) => (
+            <View key={item.month} style={styles.barColumn}>
+              <View style={styles.bars}>
+                <AnimatedBar targetHeight={Math.max(4, (item.income / maxMonth) * 130)} color={palette.income} />
+                <AnimatedBar targetHeight={Math.max(4, (item.expense / maxMonth) * 130)} color={palette.expense} />
+              </View>
+              <Text style={styles.month}>
+                {new Date(2026, item.month - 1).toLocaleDateString("en", {
+                  month: "narrow",
+                })}
+              </Text>
             </View>
-            <Text style={styles.month}>
-              {new Date(2026, item.month - 1).toLocaleDateString("en", {
-                month: "narrow",
-              })}
-            </Text>
-          </View>
-        ))}
-      </Surface>
+          ))}
+        </Surface>
+      </Reanimated.View>
+
       <View style={styles.legend}>
-        <Text style={{ color: palette.income }}>● Income</Text>
-        <Text style={{ color: palette.expense }}>● Expense</Text>
+        <Text style={{ color: palette.income, fontWeight: '600' }}>● Income</Text>
+        <Text style={{ color: palette.expense, fontWeight: '600' }}>● Expense</Text>
       </View>
     </>
   );
@@ -261,105 +261,90 @@ function YearlyView() {
       <Text variant="titleLarge" style={styles.heading}>
         Year at a glance
       </Text>
-      <View style={styles.summaryRow}>
-        <Surface style={styles.summaryCard} elevation={0}>
-          <Text style={styles.muted}>Income</Text>
-          <Text variant="titleMedium" style={{ color: palette.income }}>
-            {currency(totalIncome)}
-          </Text>
-        </Surface>
-        <Surface style={styles.summaryCard} elevation={0}>
-          <Text style={styles.muted}>Expense</Text>
-          <Text variant="titleMedium" style={{ color: palette.expense }}>
-            {currency(totalExpense)}
-          </Text>
-        </Surface>
-        <Surface style={styles.summaryCard} elevation={0}>
-          <Text style={styles.muted}>Balance</Text>
-          <Text
-            variant="titleMedium"
-            style={{ color: balance >= 0 ? palette.income : palette.expense }}
-          >
-            {currency(balance)}
-          </Text>
-        </Surface>
-      </View>
+      <Reanimated.View entering={FadeInDown.delay(100).duration(400)}>
+        <View style={styles.summaryRow}>
+          <Surface style={styles.summaryCard} elevation={0}>
+            <Text style={styles.muted}>Income</Text>
+            <Text variant="titleMedium" style={{ color: palette.income, fontWeight: '700' }}>
+              {currency(totalIncome)}
+            </Text>
+          </Surface>
+          <Surface style={styles.summaryCard} elevation={0}>
+            <Text style={styles.muted}>Expense</Text>
+            <Text variant="titleMedium" style={{ color: palette.expense, fontWeight: '700' }}>
+              {currency(totalExpense)}
+            </Text>
+          </Surface>
+          <Surface style={styles.summaryCard} elevation={0}>
+            <Text style={styles.muted}>Balance</Text>
+            <Text
+              variant="titleMedium"
+              style={{ color: balance >= 0 ? palette.income : palette.expense, fontWeight: '700' }}
+            >
+              {currency(balance)}
+            </Text>
+          </Surface>
+        </View>
+      </Reanimated.View>
+
       <Text variant="titleLarge" style={styles.heading}>
         Monthly breakdown
       </Text>
-      <Surface style={styles.card} elevation={0}>
-        {data.length ? (
-          data.map((item) => {
-            const pct = totalExpense
-              ? (item.expense / totalExpense) * 100
-              : 0;
-            const monthName = new Date(2026, item.month - 1).toLocaleDateString(
-              "en-IN",
-              { month: "long" },
-            );
-            return (
-              <View key={item.month} style={styles.category}>
-                <View style={styles.row}>
-                  <Text style={{ color: palette.text }}>{monthName}</Text>
-                  <Text style={{ color: palette.textSecondary }}>
-                    {currency(item.expense)} / {currency(item.income)}
-                  </Text>
+      <Reanimated.View entering={FadeInDown.delay(200).duration(400)}>
+        <Surface style={styles.card} elevation={0}>
+          {data.length ? (
+            data.map((item) => {
+              const pct = totalExpense
+                ? (item.expense / totalExpense) * 100
+                : 0;
+              const monthName = new Date(2026, item.month - 1).toLocaleDateString(
+                "en-IN",
+                { month: "long" },
+              );
+              return (
+                <View key={item.month} style={styles.category}>
+                  <View style={styles.row}>
+                    <Text style={{ color: palette.text, fontWeight: '500' }}>{monthName}</Text>
+                    <Text style={{ color: palette.textSecondary, fontWeight: '600' }}>
+                      {currency(item.expense)} / {currency(item.income)}
+                    </Text>
+                  </View>
+                  <View style={styles.track}>
+                    <AnimatedProgressBar percent={pct} color={palette.expense} />
+                  </View>
                 </View>
-                <View style={styles.track}>
-                  <View
-                    style={[
-                      styles.fill,
-                      {
-                        width: `${pct}%`,
-                        backgroundColor: palette.expense,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            );
-          })
-        ) : (
-          <EmptyState text="No data for this year." />
-        )}
-      </Surface>
+              );
+            })
+          ) : (
+            <EmptyState text="No data for this year." />
+          )}
+        </Surface>
+      </Reanimated.View>
+
       <Text variant="titleLarge" style={styles.heading}>
         Annual trend
       </Text>
-      <Surface style={[styles.card, styles.chart]} elevation={0}>
-        {data.map((item) => (
-          <View key={item.month} style={styles.barColumn}>
-            <View style={styles.bars}>
-              <View
-                style={[
-                  styles.bar,
-                  {
-                    height: Math.max(4, (item.income / maxMonth) * 130),
-                    backgroundColor: palette.income,
-                  },
-                ]}
-              />
-              <View
-                style={[
-                  styles.bar,
-                  {
-                    height: Math.max(4, (item.expense / maxMonth) * 130),
-                    backgroundColor: palette.expense,
-                  },
-                ]}
-              />
+      <Reanimated.View entering={FadeInDown.delay(300).duration(400)}>
+        <Surface style={[styles.card, styles.chart]} elevation={0}>
+          {data.map((item) => (
+            <View key={item.month} style={styles.barColumn}>
+              <View style={styles.bars}>
+                <AnimatedBar targetHeight={Math.max(4, (item.income / maxMonth) * 130)} color={palette.income} />
+                <AnimatedBar targetHeight={Math.max(4, (item.expense / maxMonth) * 130)} color={palette.expense} />
+              </View>
+              <Text style={styles.month}>
+                {new Date(2026, item.month - 1).toLocaleDateString("en", {
+                  month: "narrow",
+                })}
+              </Text>
             </View>
-            <Text style={styles.month}>
-              {new Date(2026, item.month - 1).toLocaleDateString("en", {
-                month: "narrow",
-              })}
-            </Text>
-          </View>
-        ))}
-      </Surface>
+          ))}
+        </Surface>
+      </Reanimated.View>
+
       <View style={styles.legend}>
-        <Text style={{ color: palette.income }}>● Income</Text>
-        <Text style={{ color: palette.expense }}>● Expense</Text>
+        <Text style={{ color: palette.income, fontWeight: '600' }}>● Income</Text>
+        <Text style={{ color: palette.expense, fontWeight: '600' }}>● Expense</Text>
       </View>
     </>
   );
@@ -388,13 +373,7 @@ export default function ChartsScreen() {
     <Screen
       refreshing={refreshing}
       onRefresh={onRefresh}
-      fixed={
-        <FAB
-          icon="plus"
-          style={styles.fab}
-          onPress={() => router.push("/add-transaction")}
-        />
-      }
+      fixed={<FloatingFAB onPress={() => router.push("/add-transaction")} />}
     >
       <PageHeader title="Analytics" subtitle="See where your money goes" />
       <View style={styles.tabRow}>
@@ -405,7 +384,7 @@ export default function ChartsScreen() {
             style={({ pressed }) => [
               styles.tabButton,
               period === tab && styles.tabButtonActive,
-              pressed && { opacity: 0.7 }
+              pressed && { opacity: 0.8 }
             ]}
           >
             <Text
@@ -427,43 +406,57 @@ export default function ChartsScreen() {
 }
 
 const styles = StyleSheet.create({
-  heading: { fontWeight: "700", marginTop: 26, marginBottom: 12 },
+  heading: { fontWeight: "700", marginTop: 26, marginBottom: 12, color: palette.text },
   tabRow: {
     flexDirection: "row",
-    backgroundColor: palette.surface,
-    borderRadius: 14,
+    backgroundColor: palette.card,
+    borderRadius: 16,
     padding: 4,
     gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
   },
   tabButton: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 11,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   tabButtonActive: {
     backgroundColor: palette.primary,
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
   },
   tabLabel: {
     color: palette.muted,
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   tabLabelActive: {
-    color: palette.textDark, // Dark text on primary orange tab for contrast
+    color: palette.textDark,
   },
   card: {
-    backgroundColor: palette.surface,
+    backgroundColor: palette.card,
     padding: 18,
     borderRadius: 18,
     gap: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   category: { gap: 8 },
   row: { flexDirection: "row", justifyContent: "space-between" },
   track: {
     height: 8,
-    backgroundColor: palette.surfaceAlt,
+    backgroundColor: palette.surface,
     borderRadius: 4,
     overflow: "hidden",
   },
@@ -477,27 +470,28 @@ const styles = StyleSheet.create({
   },
   barColumn: { flex: 1, alignItems: "center", gap: 6 },
   bars: { height: 140, flexDirection: "row", alignItems: "flex-end", gap: 2 },
-  bar: { width: 5, borderRadius: 3 },
-  month: { color: palette.muted, fontSize: 10 },
-  muted: { color: palette.muted, fontSize: 12 },
+  bar: { width: 6, borderRadius: 3 },
+  month: { color: palette.muted, fontSize: 10, marginTop: 4, fontWeight: '500' },
+  muted: { color: palette.muted, fontSize: 12, fontWeight: '500' },
   legend: {
     flexDirection: "row",
     justifyContent: "center",
     gap: 24,
-    marginTop: 12,
+    marginTop: 18,
   },
-  summaryRow: { flexDirection: "row", gap: 10, marginTop: 16 },
+  summaryRow: { flexDirection: "row", gap: 10, marginTop: 12 },
   summaryCard: {
     flex: 1,
     padding: 12,
     borderRadius: 16,
-    backgroundColor: palette.surface,
+    backgroundColor: palette.card,
     gap: 6,
-  },
-  fab: {
-    position: "absolute",
-    right: 22,
-    bottom: 94,
-    backgroundColor: palette.primary,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
 });

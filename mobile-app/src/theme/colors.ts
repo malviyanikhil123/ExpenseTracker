@@ -4,6 +4,7 @@ export const colors = {
   surface: '#4A4B57',          // Solid opaque surface — was rgba(255,255,255,0.04) = nearly invisible
   surfaceSecondary: '#52535F',  // Slightly lighter solid surface — was rgba(255,255,255,0.08)
   surfaceElevated: '#565761',   // For dialogs/modals that need to float above surface
+  card: '#50515F',              // Elevated card surfaces
 
   // Brand
   primary: '#F6A242',    // Primary Orange

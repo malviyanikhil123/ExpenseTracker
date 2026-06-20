@@ -34,6 +34,11 @@ export type Transaction = {
     color: string;
     name: string;
   };
+  isDebt?: boolean;
+  isRepayment?: boolean;
+  remainingAmount?: string;
+  status?: 'open' | 'repaid';
+  personName?: string;
 };
 export type Summary = { income: number; expense: number; balance: number };
 export type BudgetStatus = { budget: number; spent: number; remaining: number };

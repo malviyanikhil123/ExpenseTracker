@@ -2,16 +2,22 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { FlatList, Pressable, ScrollView, StyleSheet, View, Linking, Platform } from "react-native";
-import { ActivityIndicator, Button, Chip, Dialog, FAB, HelperText, Portal, Surface, Text, TextInput } from "react-native-paper";
+import { Pressable, ScrollView, StyleSheet, View, Linking, Platform } from "react-native";
+import { ActivityIndicator, Button, Chip, Dialog, Portal, Surface, Text, TextInput } from "react-native-paper";
 import { CustomDatePicker, useCustomAlert } from "@/components/custom-dialogs";
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  FadeInDown,
+} from "react-native-reanimated";
 
 import { useAccounts, useDebts, useDeleteDebt, useRepayDebt, useRepayments, useMarkReminderSent } from "@/api/queries";
-import { EmptyState, LoadingState, PageHeader } from "@/components/finance-ui";
+import { EmptyState, LoadingState, PageHeader, FloatingFAB } from "@/components/finance-ui";
 import { Screen } from "@/components/screen";
 import { palette } from "@/constants/app-theme";
 import { currency } from "@/lib/format";
-import type { Debt, DebtRepayment } from "@/types";
+import type { Debt } from "@/types";
 
 function isReminderDue(debt: Debt): boolean {
   if (debt.status === "repaid" || !debt.reminderInterval || debt.reminderInterval === "none" || !debt.phoneNumber) {
@@ -36,6 +42,79 @@ function isReminderDue(debt: Debt): boolean {
   return false;
 }
 
+function DebtCard({ item, index, onOpen }: { item: Debt; index: number; onOpen: () => void }) {
+  const isLend = item.type === "lend";
+  const isRepaid = item.status === "repaid";
+  const color = isRepaid ? palette.muted : isLend ? palette.income : palette.warning;
+
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.97, { damping: 15 });
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1, { damping: 15 });
+  };
+
+  return (
+    <Reanimated.View
+      entering={FadeInDown.delay(100 + index * 40).duration(400)}
+      style={[animatedStyle, { marginBottom: 10 }]}
+    >
+      <Pressable
+        onPress={onOpen}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Surface style={[styles.itemCard, { marginBottom: 0 }]} elevation={0}>
+          <View style={[styles.iconCircle, { backgroundColor: `${color}15` }]}>
+            <MaterialCommunityIcons
+              name={isRepaid ? "check-circle-outline" : isLend ? "hand-pointing-right" : "hand-pointing-left"}
+              color={color}
+              size={22}
+            />
+          </View>
+          <View style={styles.grow}>
+            <View style={styles.row}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+                <Text variant="titleMedium" style={[styles.bold, isRepaid && styles.strikethrough, { flexShrink: 1, color: palette.text }]} numberOfLines={1}>
+                  {item.personName}
+                </Text>
+                {isReminderDue(item) && (
+                  <View style={styles.dueBadge}>
+                    <MaterialCommunityIcons name="clock-alert-outline" size={10} color={palette.warning} />
+                    <Text style={styles.dueBadgeText}>Due</Text>
+                  </View>
+                )}
+              </View>
+              <Text variant="titleMedium" style={{ color, fontWeight: "700" }}>
+                {isLend ? "+" : "-"}{currency(item.remainingAmount)}
+              </Text>
+            </View>
+            <View style={styles.row}>
+              <Text style={[styles.mutedSmall, { flex: 1, marginRight: 8 }]} numberOfLines={1}>
+                {isLend ? "Lent" : "Borrowed"} • {new Date(item.transactionDate).toLocaleDateString("en-IN")}
+              </Text>
+              {isRepaid ? (
+                <Text style={styles.repaidText}>Repaid</Text>
+              ) : (
+                <Text style={[styles.mutedSmall, { textAlign: "right" }]}>
+                  of {currency(item.amount)}
+                </Text>
+              )}
+            </View>
+          </View>
+        </Surface>
+      </Pressable>
+    </Reanimated.View>
+  );
+}
+
 export default function DebtsScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -50,13 +129,11 @@ export default function DebtsScreen() {
   const [filterType, setFilterType] = useState<"all" | "lend" | "borrow">("all");
   const [showRepaid, setShowRepaid] = useState(false);
   
-  // Selected Debt for details
   const [selectedDebtId, setSelectedDebtId] = useState<string | null>(null);
   const selectedDebt = useMemo(() => {
     return (debts.data ?? []).find((d) => d.id === selectedDebtId) ?? null;
   }, [debts.data, selectedDebtId]);
   
-  // Repayment form state
   const [showRepayModal, setShowRepayModal] = useState(false);
   const [repayAmount, setRepayAmount] = useState("");
   const [repayAccountId, setRepayAccountId] = useState<string>("");
@@ -77,14 +154,12 @@ export default function DebtsScreen() {
     }, [queryClient])
   );
 
-  // Set default account when account list loads
   useMemo(() => {
     if (!repayAccountId && accounts.data?.[0]) {
       setRepayAccountId(accounts.data[0].id);
     }
   }, [accounts.data, repayAccountId]);
 
-  // Outstanding calculations
   const totals = useMemo(() => {
     let lent = 0;
     let borrowed = 0;
@@ -99,7 +174,6 @@ export default function DebtsScreen() {
     return { lent, borrowed, net: lent - borrowed };
   }, [debts.data]);
 
-  // Filtered debts
   const filteredDebts = useMemo(() => {
     return (debts.data ?? []).filter((d) => {
       const matchesType = filterType === "all" || d.type === filterType;
@@ -215,36 +289,30 @@ export default function DebtsScreen() {
     <Screen
       refreshing={refreshing}
       onRefresh={onRefresh}
-      fixed={
-        <FAB
-          icon="plus"
-          style={styles.fab}
-          onPress={() => router.push("/add-debt")}
-        />
-      }
+      fixed={<FloatingFAB onPress={() => router.push("/add-debt")} />}
     >
       <PageHeader title="Debts & Loans" subtitle="Track lending and borrowing" />
 
       {/* Summary Cards */}
-      <View style={styles.summaryRow}>
+      <Reanimated.View entering={FadeInDown.delay(50).duration(400)} style={styles.summaryRow}>
         <Surface style={styles.summaryCard} elevation={0}>
           <MaterialCommunityIcons name="arrow-up-bold-circle-outline" color={palette.income} size={20} />
           <Text style={styles.mutedSmall}>You Lent</Text>
-          <Text variant="titleMedium" style={{ color: palette.income }}>{currency(totals.lent)}</Text>
+          <Text variant="titleMedium" style={{ color: palette.income, fontWeight: '700' }}>{currency(totals.lent)}</Text>
         </Surface>
         <Surface style={styles.summaryCard} elevation={0}>
           <MaterialCommunityIcons name="arrow-down-bold-circle-outline" color={palette.warning} size={20} />
           <Text style={styles.mutedSmall}>You Borrowed</Text>
-          <Text variant="titleMedium" style={{ color: palette.warning }}>{currency(totals.borrowed)}</Text>
+          <Text variant="titleMedium" style={{ color: palette.warning, fontWeight: '700' }}>{currency(totals.borrowed)}</Text>
         </Surface>
         <Surface style={styles.summaryCard} elevation={0}>
           <MaterialCommunityIcons name="scale-balance" color={palette.primary} size={20} />
           <Text style={styles.mutedSmall}>Net Balance</Text>
-          <Text variant="titleMedium" style={{ color: totals.net >= 0 ? palette.income : palette.expense }}>
+          <Text variant="titleMedium" style={{ color: totals.net >= 0 ? palette.income : palette.expense, fontWeight: '700' }}>
             {totals.net >= 0 ? "+" : ""}{currency(totals.net)}
           </Text>
         </Surface>
-      </View>
+      </Reanimated.View>
 
       {/* Filters */}
       <View style={styles.filterBar}>
@@ -264,7 +332,8 @@ export default function DebtsScreen() {
         <Chip
           selected={showRepaid}
           onPress={() => setShowRepaid(!showRepaid)}
-          style={styles.repaidChip}
+          style={[styles.repaidChip, showRepaid && { backgroundColor: palette.primary }]}
+          textStyle={[styles.chipText, showRepaid && { color: palette.textDark, fontWeight: '700' }]}
           showSelectedOverlay
         >
           Show Repaid
@@ -278,66 +347,23 @@ export default function DebtsScreen() {
         <EmptyState text="No debts or loans found." />
       ) : (
         <View style={styles.list}>
-          {filteredDebts.map((item) => {
-            const isLend = item.type === "lend";
-            const isRepaid = item.status === "repaid";
-            const color = isRepaid ? palette.muted : isLend ? palette.income : palette.warning;
-            
-            return (
-              <Pressable
-                key={item.id}
-                onPress={() => setSelectedDebtId(item.id)}
-                style={({ pressed }) => [styles.itemCard, pressed && styles.itemCardPressed]}
-              >
-                <View style={[styles.iconCircle, { backgroundColor: `${color}15` }]}>
-                  <MaterialCommunityIcons
-                    name={isRepaid ? "check-circle-outline" : isLend ? "hand-pointing-right" : "hand-pointing-left"}
-                    color={color}
-                    size={22}
-                  />
-                </View>
-                <View style={styles.grow}>
-                  <View style={styles.row}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
-                      <Text variant="titleMedium" style={[styles.bold, isRepaid && styles.strikethrough, { flexShrink: 1 }]} numberOfLines={1}>
-                        {item.personName}
-                      </Text>
-                      {isReminderDue(item) && (
-                        <View style={styles.dueBadge}>
-                          <MaterialCommunityIcons name="clock-alert-outline" size={10} color={palette.warning} />
-                          <Text style={styles.dueBadgeText}>Due</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text variant="titleMedium" style={{ color, fontWeight: "700" }}>
-                      {isLend ? "+" : "-"}{currency(item.remainingAmount)}
-                    </Text>
-                  </View>
-                  <View style={styles.row}>
-                    <Text style={[styles.mutedSmall, { flex: 1, marginRight: 8 }]} numberOfLines={1}>
-                      {isLend ? "Lent" : "Borrowed"} • {new Date(item.transactionDate).toLocaleDateString("en-IN")}
-                    </Text>
-                    {isRepaid ? (
-                      <Text style={styles.repaidText}>Repaid</Text>
-                    ) : (
-                      <Text style={[styles.mutedSmall, { textAlign: "right" }]}>
-                        of {currency(item.amount)}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-              </Pressable>
-            );
-          })}
+          {filteredDebts.map((item, idx) => (
+            <DebtCard
+              key={item.id}
+              item={item}
+              index={idx}
+              onOpen={() => setSelectedDebtId(item.id)}
+            />
+          ))}
         </View>
       )}
 
       {/* Debt Details Modal */}
       <Portal>
-        <Dialog visible={Boolean(selectedDebt)} onDismiss={() => setSelectedDebtId(null)} style={[styles.dialog, { backgroundColor: palette.surfaceElevated }]}>
+        <Dialog visible={Boolean(selectedDebt)} onDismiss={() => setSelectedDebtId(null)} style={styles.dialog}>
           {selectedDebt && (
             <View>
-              <Dialog.Title style={[styles.bold, { color: palette.text }]}>
+              <Dialog.Title style={styles.dialogTitle}>
                 {selectedDebt.type === "lend" ? "Lent to" : "Borrowed from"} {selectedDebt.personName}
               </Dialog.Title>
               <Dialog.Content>
@@ -403,7 +429,7 @@ export default function DebtsScreen() {
                   <RepaymentsList debtId={selectedDebt.id} />
                 </ScrollView>
               </Dialog.Content>
-              <View style={[styles.dialogActions, { flexDirection: "row", alignItems: "center" }]}>
+              <View style={styles.dialogActions}>
                 <Button mode="text" textColor={palette.expense} onPress={() => handleDelete(selectedDebt)}>
                   Delete
                 </Button>
@@ -435,11 +461,11 @@ export default function DebtsScreen() {
 
         {/* Repayment Dialog */}
         <Dialog visible={showRepayModal} onDismiss={() => setShowRepayModal(false)} style={styles.dialog}>
-          <Dialog.Title style={[styles.bold, { color: palette.text }]}>Record Repayment</Dialog.Title>
-          <Dialog.Content>
+          <Dialog.Title style={styles.dialogTitle}>Record Repayment</Dialog.Title>
+          <Dialog.Content style={styles.dialogContent}>
             {selectedDebt && (
               <ScrollView style={{ maxHeight: 340 }}>
-                <Text style={{ marginBottom: 12, color: palette.text }}>
+                <Text style={{ marginBottom: 12, color: palette.text, fontSize: 13, lineHeight: 18 }}>
                   Record how much is returned for the loan of {selectedDebt.personName}. (Max: {currency(selectedDebt.remainingAmount)})
                 </Text>
                 
@@ -448,18 +474,25 @@ export default function DebtsScreen() {
                   label="Amount"
                   value={repayAmount}
                   onChangeText={setRepayAmount}
+                  textColor={palette.text}
+                  activeOutlineColor={palette.primary}
+                  outlineColor={palette.border}
+                  placeholderTextColor={palette.muted}
+                  style={styles.textInput}
                   keyboardType="decimal-pad"
                   left={<TextInput.Affix text="₹ " />}
-                  style={{ marginBottom: 12 }}
                 />
 
-                <Text style={[styles.bold, { marginTop: 10, marginBottom: 6, color: palette.text }]}>Account</Text>
+                <Text style={[styles.bold, { marginTop: 14, marginBottom: 8, color: palette.text, fontSize: 14 }]}>Account</Text>
                 <View style={styles.chips}>
                   {accounts.data?.map((acc) => (
                     <Chip
                       key={acc.id}
                       selected={repayAccountId === acc.id}
                       onPress={() => setRepayAccountId(acc.id)}
+                      style={[styles.repaidChip, repayAccountId === acc.id && { backgroundColor: palette.primary }]}
+                      textStyle={[styles.chipText, repayAccountId === acc.id && { color: palette.textDark, fontWeight: '700' }]}
+                      showSelectedOverlay
                     >
                       {acc.name}
                     </Chip>
@@ -471,13 +504,22 @@ export default function DebtsScreen() {
                   label="Note (optional)"
                   value={repayNote}
                   onChangeText={setRepayNote}
-                  style={{ marginVertical: 12 }}
+                  textColor={palette.text}
+                  activeOutlineColor={palette.primary}
+                  outlineColor={palette.border}
+                  placeholderTextColor={palette.muted}
+                  style={[styles.textInput, { marginVertical: 14 }]}
                 />
 
                 <Pressable onPress={() => setShowDatePicker(true)}>
                   <TextInput
                     mode="outlined"
                     label="Repayment Date"
+                    textColor={palette.text}
+                    activeOutlineColor={palette.primary}
+                    outlineColor={palette.border}
+                    placeholderTextColor={palette.muted}
+                    style={styles.textInput}
                     value={repayDate.toLocaleDateString("en-IN")}
                     editable={false}
                     left={<TextInput.Icon icon="calendar" />}
@@ -496,13 +538,16 @@ export default function DebtsScreen() {
               </ScrollView>
             )}
           </Dialog.Content>
-          <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, paddingBottom: 16, gap: 8 }}>
-            <Button onPress={() => setShowRepayModal(false)}>Cancel</Button>
+          <View style={styles.dialogActions}>
+            <Button textColor={palette.muted} onPress={() => setShowRepayModal(false)}>Cancel</Button>
             <Button
               mode="contained"
+              buttonColor={palette.primary}
+              textColor={palette.textDark}
               onPress={submitRepayment}
               loading={isSubmittingRepay}
               disabled={isSubmittingRepay || !repayAmount || Number(repayAmount) <= 0}
+              style={{ borderRadius: 12 }}
             >
               Save
             </Button>
@@ -542,84 +587,129 @@ function RepaymentsList({ debtId }: { debtId: string }) {
 }
 
 const styles = StyleSheet.create({
-  fab: {
-    position: "absolute",
-    right: 22,
-    bottom: 94,
-    backgroundColor: palette.primary,
-  },
   summaryRow: { flexDirection: "row", gap: 10, marginBottom: 20 },
-  summaryCard: { flex: 1, padding: 12, borderRadius: 16, backgroundColor: palette.surface, gap: 6 },
+  summaryCard: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: palette.card,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
   mutedSmall: { color: palette.muted, fontSize: 11 },
   muted: { color: palette.muted },
   bold: { fontWeight: "700" },
   filterBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   tabRow: {
     flexDirection: "row",
-    backgroundColor: palette.surface,
-    borderRadius: 12,
-    padding: 3,
+    backgroundColor: palette.card,
+    borderRadius: 14,
+    padding: 4,
     gap: 4,
     flex: 1,
     marginRight: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
   },
   tabButton: {
     flex: 1,
-    paddingVertical: 7,
-    borderRadius: 9,
+    paddingVertical: 8,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   tabButtonActive: {
     backgroundColor: palette.primary,
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
   },
   tabLabel: {
     color: palette.muted,
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   tabLabelActive: {
-    color: palette.textDark, // Dark text on primary orange tab for contrast
+    color: palette.textDark,
   },
   repaidChip: {
-    backgroundColor: palette.surface,
+    backgroundColor: palette.card,
     height: 38,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 12,
+  },
+  chipText: {
+    fontSize: 11,
+    color: palette.text,
   },
   list: { gap: 10, marginBottom: 30 },
   itemCard: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: palette.surface,
-    padding: 14,
-    borderRadius: 16,
+    backgroundColor: palette.card,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 18,
     gap: 12,
-  },
-  itemCardPressed: {
-    backgroundColor: palette.surfaceAlt,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
   iconCircle: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   grow: { flex: 1 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   strikethrough: { textDecorationLine: "line-through", color: palette.muted },
-  repaidText: { color: palette.income, fontSize: 11, fontWeight: "600" },
-  dialog: { backgroundColor: palette.surfaceElevated, borderRadius: 20 },
-  dialogActions: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
-  detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: palette.border },
-  note: { color: palette.text, marginTop: 2 },
+  repaidText: { color: palette.income, fontSize: 11, fontWeight: "700" },
+  dialog: {
+    backgroundColor: palette.surfaceElevated,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  dialogTitle: {
+    fontWeight: "800",
+    color: palette.text,
+    fontSize: 20,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: palette.border },
+  note: { color: palette.text, marginTop: 2, fontSize: 13, lineHeight: 18 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   repaymentsList: { gap: 8, marginTop: 4 },
   repaymentRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: palette.surfaceAlt,
+    backgroundColor: palette.surface,
     padding: 10,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.04)",
   },
   repayNote: { fontStyle: "italic", fontSize: 11, color: palette.muted, marginTop: 2 },
   dueBadge: { flexDirection: "row", alignItems: "center", backgroundColor: `${palette.warning}15`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, gap: 2 },
-  dueBadgeText: { color: palette.warning, fontSize: 10, fontWeight: "600" },
-  reminderCard: { marginTop: 14, backgroundColor: palette.surfaceAlt, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: palette.border },
+  dueBadgeText: { color: palette.warning, fontSize: 10, fontWeight: "700" },
+  reminderCard: { marginTop: 14, backgroundColor: palette.surface, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
   reminderHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
   customRemindButton: {
     flexDirection: "row",
@@ -639,5 +729,12 @@ const styles = StyleSheet.create({
     color: palette.primary,
     fontSize: 12,
     fontWeight: "700",
+  },
+  textInput: {
+    backgroundColor: palette.surface,
+  },
+  dialogContent: {
+    gap: 12,
+    paddingHorizontal: 24,
   },
 });

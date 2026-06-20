@@ -57,7 +57,9 @@ export const financeRepository = {
     },
   ) {
     const { start, end } = monthRange(query.month, query.year);
-    const where = and(
+
+    // 1. Fetch base transactions
+    const txWhere = and(
       eq(transactions.userId, userId),
       gte(transactions.transactionDate, start),
       lt(transactions.transactionDate, end),
@@ -73,35 +75,155 @@ export const financeRepository = {
         )
         : undefined,
     );
-    const [items, count] = await Promise.all([
-      db
-        .select({
-          id: transactions.id,
-          userId: transactions.userId,
-          accountId: transactions.accountId,
-          categoryId: transactions.categoryId,
-          fromAccountId: transactions.fromAccountId,
-          toAccountId: transactions.toAccountId,
-          type: transactions.type,
-          amount: transactions.amount,
-          title: transactions.title,
-          note: transactions.note,
-          transactionDate: transactions.transactionDate,
-          category: {
-            icon: categories.icon,
-            color: categories.color,
-            name: categories.name,
-          },
-        })
-        .from(transactions)
-        .leftJoin(categories, eq(transactions.categoryId, categories.id))
-        .where(where)
-        .orderBy(desc(transactions.transactionDate))
-        .limit(query.limit)
-        .offset((query.page - 1) * query.limit),
-      db.select({ count: sql<number>`count(*)::int` }).from(transactions).where(where),
-    ]);
-    return { items, total: count[0]?.count ?? 0 };
+
+    const txRows = await db
+      .select({
+        id: transactions.id,
+        userId: transactions.userId,
+        accountId: transactions.accountId,
+        categoryId: transactions.categoryId,
+        fromAccountId: transactions.fromAccountId,
+        toAccountId: transactions.toAccountId,
+        type: transactions.type,
+        amount: transactions.amount,
+        title: transactions.title,
+        note: transactions.note,
+        transactionDate: transactions.transactionDate,
+        category: {
+          icon: categories.icon,
+          color: categories.color,
+          name: categories.name,
+        },
+      })
+      .from(transactions)
+      .leftJoin(categories, eq(transactions.categoryId, categories.id))
+      .where(txWhere);
+
+    // 2. Fetch debts
+    const debtWhere = and(
+      eq(debts.userId, userId),
+      gte(debts.transactionDate, start),
+      lt(debts.transactionDate, end),
+      query.accountId ? eq(debts.accountId, query.accountId) : undefined,
+      query.search
+        ? or(ilike(debts.personName, `%${query.search}%`), ilike(debts.note, `%${query.search}%`))
+        : undefined,
+    );
+
+    const debtRows = await db
+      .select()
+      .from(debts)
+      .where(debtWhere);
+
+    // Filter debts by type if requested
+    const filteredDebts = debtRows.filter((d) => {
+      if (!query.type) return true;
+      if (query.type === "expense" && d.type === "lend") return true;
+      if (query.type === "income" && d.type === "borrow") return true;
+      return false;
+    });
+
+    // 3. Fetch repayments
+    const repaymentWhere = and(
+      eq(debtRepayments.userId, userId),
+      gte(debtRepayments.transactionDate, start),
+      lt(debtRepayments.transactionDate, end),
+      query.accountId ? eq(debtRepayments.accountId, query.accountId) : undefined,
+      query.search
+        ? or(ilike(debtRepayments.note, `%${query.search}%`), ilike(debts.personName, `%${query.search}%`))
+        : undefined,
+    );
+
+    const repaymentRows = await db
+      .select({
+        id: debtRepayments.id,
+        userId: debtRepayments.userId,
+        debtId: debtRepayments.debtId,
+        accountId: debtRepayments.accountId,
+        amount: debtRepayments.amount,
+        note: debtRepayments.note,
+        transactionDate: debtRepayments.transactionDate,
+        debtType: debts.type,
+        personName: debts.personName,
+      })
+      .from(debtRepayments)
+      .innerJoin(debts, eq(debtRepayments.debtId, debts.id))
+      .where(repaymentWhere);
+
+    // Filter repayments by type if requested
+    const filteredRepayments = repaymentRows.filter((r) => {
+      if (!query.type) return true;
+      if (query.type === "expense" && r.debtType === "borrow") return true;
+      if (query.type === "income" && r.debtType === "lend") return true;
+      return false;
+    });
+
+    // 4. Map them all to Transaction-like shape
+    const allItems = [
+      ...txRows.map((t) => ({
+        ...t,
+        isDebt: false,
+        isRepayment: false,
+        remainingAmount: null,
+        status: null,
+        personName: null,
+      })),
+      ...filteredDebts.map((d) => ({
+        id: d.id,
+        userId: d.userId,
+        accountId: d.accountId,
+        categoryId: null,
+        fromAccountId: null,
+        toAccountId: null,
+        type: d.type === "lend" ? "expense" as const : "income" as const,
+        amount: d.amount,
+        title: d.type === "lend" ? `Lent to ${d.personName}` : `Borrowed from ${d.personName}`,
+        note: d.note,
+        transactionDate: d.transactionDate,
+        isDebt: true,
+        isRepayment: false,
+        remainingAmount: d.remainingAmount,
+        status: d.status,
+        personName: d.personName,
+        category: {
+          icon: d.type === "lend" ? "arrow-up-bold-box-outline" : "arrow-down-bold-box-outline",
+          color: d.type === "lend" ? "#E65100" : "#1B5E20",
+          name: d.type === "lend" ? "Lend" : "Borrow",
+        },
+      })),
+      ...filteredRepayments.map((r) => ({
+        id: r.id,
+        userId: r.userId,
+        accountId: r.accountId,
+        categoryId: null,
+        fromAccountId: null,
+        toAccountId: null,
+        type: r.debtType === "borrow" ? "expense" as const : "income" as const,
+        amount: r.amount,
+        title: r.debtType === "borrow" ? `Repaid to ${r.personName}` : `Repayment from ${r.personName}`,
+        note: r.note,
+        transactionDate: r.transactionDate,
+        isDebt: false,
+        isRepayment: true,
+        remainingAmount: null,
+        status: null,
+        personName: r.personName,
+        category: {
+          icon: r.debtType === "borrow" ? "arrow-up-bold-box" : "arrow-down-bold-box",
+          color: r.debtType === "borrow" ? "#C62828" : "#2E7D32",
+          name: r.debtType === "borrow" ? "Borrow Repayment" : "Lend Repayment",
+        },
+      })),
+    ];
+
+    // Sort by transactionDate desc
+    allItems.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
+
+    // Paginate
+    const total = allItems.length;
+    const paginatedItems = allItems.slice((query.page - 1) * query.limit, query.page * query.limit);
+
+    return { items: paginatedItems, total };
   },
   findTransaction: (userId: string, id: string) =>
     db.query.transactions.findFirst({
@@ -261,7 +383,9 @@ export const financeRepository = {
 
   async summary(userId: string, month: number, year: number) {
     const { start, end } = monthRange(month, year);
-    const rows = await db
+    
+    // 1. Get monthly transactions summary (for Income and Expense display)
+    const monthlyRows = await db
       .select({
         type: transactions.type,
         total: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
@@ -275,9 +399,69 @@ export const financeRepository = {
         ),
       )
       .groupBy(transactions.type);
-    const income = Number(rows.find((row) => row.type === "income")?.total ?? 0);
-    const expense = Number(rows.find((row) => row.type === "expense")?.total ?? 0);
-    return { income, expense, balance: income - expense };
+
+    const income = Number(monthlyRows.find((row) => row.type === "income")?.total ?? 0);
+    const expense = Number(monthlyRows.find((row) => row.type === "expense")?.total ?? 0);
+
+    // 2. Get cumulative transactions up to the end of the target month
+    const cumulativeRows = await db
+      .select({
+        type: transactions.type,
+        total: sql<string>`coalesce(sum(${transactions.amount}), 0)`,
+      })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.userId, userId),
+          lt(transactions.transactionDate, end),
+        ),
+      )
+      .groupBy(transactions.type);
+
+    const cumIncome = Number(cumulativeRows.find((row) => row.type === "income")?.total ?? 0);
+    const cumExpense = Number(cumulativeRows.find((row) => row.type === "expense")?.total ?? 0);
+
+    // 3. Get cumulative debts up to the end of the target month
+    const cumulativeDebts = await db
+      .select({
+        type: debts.type,
+        total: sql<string>`coalesce(sum(${debts.amount}), 0)`,
+      })
+      .from(debts)
+      .where(
+        and(
+          eq(debts.userId, userId),
+          lt(debts.transactionDate, end),
+        ),
+      )
+      .groupBy(debts.type);
+
+    const cumLendAmount = Number(cumulativeDebts.find((d) => d.type === "lend")?.total ?? 0);
+    const cumBorrowAmount = Number(cumulativeDebts.find((d) => d.type === "borrow")?.total ?? 0);
+
+    // 4. Get cumulative debt repayments up to the end of the target month
+    const cumulativeRepayments = await db
+      .select({
+        type: debts.type,
+        total: sql<string>`coalesce(sum(${debtRepayments.amount}), 0)`,
+      })
+      .from(debtRepayments)
+      .innerJoin(debts, eq(debtRepayments.debtId, debts.id))
+      .where(
+        and(
+          eq(debtRepayments.userId, userId),
+          lt(debtRepayments.transactionDate, end),
+        ),
+      )
+      .groupBy(debts.type);
+
+    const cumLendRepayments = Number(cumulativeRepayments.find((r) => r.type === "lend")?.total ?? 0);
+    const cumBorrowRepayments = Number(cumulativeRepayments.find((r) => r.type === "borrow")?.total ?? 0);
+
+    // Balance represents the cumulative balance at the end of the target month
+    const balance = cumIncome - cumExpense - cumLendAmount + cumBorrowAmount - cumBorrowRepayments + cumLendRepayments;
+
+    return { income, expense, balance };
   },
   async categoryAnalytics(userId: string, month: number, year: number) {
     const { start, end } = monthRange(month, year);

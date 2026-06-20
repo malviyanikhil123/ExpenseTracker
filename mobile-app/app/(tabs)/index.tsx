@@ -1,10 +1,16 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { Pressable, StyleSheet, View, Linking, Platform } from "react-native";
 import { useCustomAlert } from "@/components/custom-dialogs";
-import { Button, FAB, Surface, Text } from "react-native-paper";
+import { Surface, Text } from "react-native-paper";
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  FadeInDown,
+} from "react-native-reanimated";
 
 import { useAccounts, useBudget, useDeleteTransaction, useSummary, useTransactions, useDebts, useMarkReminderSent } from "@/api/queries";
 import {
@@ -13,6 +19,7 @@ import {
   PageHeader,
   SummaryCards,
   SwipeableTransactionRow,
+  FloatingFAB,
 } from "@/components/finance-ui";
 import { Screen } from "@/components/screen";
 import { palette } from "@/constants/app-theme";
@@ -53,6 +60,9 @@ export default function HomeScreen() {
   const debts = useDebts();
   const markReminderSentMut = useMarkReminderSent();
   const { showAlert, AlertComponent } = useCustomAlert();
+
+  // Progress Bar Animation
+  const progressShared = useSharedValue(0);
 
   // Find due reminders
   const dueDebts = useMemo(() => {
@@ -128,6 +138,7 @@ export default function HomeScreen() {
       void queryClient.invalidateQueries();
     }, [queryClient])
   );
+
   const items = transactions.data?.items;
   const grouped = useMemo(() => {
     return (items ?? []).reduce<Record<string, Transaction[]>>(
@@ -139,13 +150,24 @@ export default function HomeScreen() {
       {},
     );
   }, [items]);
+
   const totalBalance = useMemo(() => {
     return (accounts.data ?? []).reduce((sum, acc) => sum + Number(acc.balance), 0);
   }, [accounts.data]);
 
-  const budgetProgress = budget.data?.budget
-    ? Math.min(budget.data.spent / budget.data.budget, 1)
-    : 0;
+  const budgetProgress = useMemo(() => {
+    return budget.data?.budget
+      ? Math.min(budget.data.spent / budget.data.budget, 1)
+      : 0;
+  }, [budget.data]);
+
+  useEffect(() => {
+    progressShared.value = withTiming(budgetProgress, { duration: 800 });
+  }, [budgetProgress, progressShared]);
+
+  const progressStyle = useAnimatedStyle(() => ({
+    width: `${progressShared.value * 100}%`,
+  }));
 
   const handleEdit = (item: Transaction) => {
     router.push({
@@ -183,20 +205,20 @@ export default function HomeScreen() {
     <Screen
       refreshing={refreshing}
       onRefresh={onRefresh}
-      fixed={
-        <FAB
-          icon="plus"
-          style={styles.fab}
-          onPress={() => router.push("/add-transaction")}
-        />
-      }
+      fixed={<FloatingFAB onPress={() => router.push("/add-transaction")} />}
     >
       <View style={styles.top}>
         <PageHeader
           title={monthLabel()}
           subtitle="Your monthly money overview"
         />
-        <Pressable onPress={() => router.push("/(tabs)/profile")}>
+        <Pressable
+          onPress={() => router.push("/(tabs)/profile")}
+          style={({ pressed }) => [
+            styles.profileButton,
+            pressed && { opacity: 0.8, transform: [{ scale: 0.95 }] }
+          ]}
+        >
           <MaterialCommunityIcons
             name="account-circle"
             size={38}
@@ -208,56 +230,67 @@ export default function HomeScreen() {
 
       {/* Due Reminders Widget */}
       {dueDebts.length > 0 && (
-        <Surface style={styles.remindersCard} elevation={0}>
-          <View style={styles.remindersHeader}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <MaterialCommunityIcons name="clock-alert-outline" size={20} color={palette.warning} />
-              <Text variant="titleMedium" style={styles.bold}>Due Reminders</Text>
-            </View>
-            <Text style={styles.reminderCount}>{dueDebts.length} pending</Text>
-          </View>
-          <View style={styles.remindersList}>
-            {dueDebts.map((debt) => (
-              <View key={debt.id} style={styles.reminderItem}>
-                <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={[styles.bold, { color: palette.text, fontSize: 14 }]}>{debt.personName}</Text>
-                  <Text style={styles.mutedSmall}>
-                    {debt.type === "lend" ? "You Lent" : "You Borrowed"} • {currency(debt.remainingAmount)} remaining
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={() => handleSendReminderClick(debt)}
-                  style={({ pressed }) => [
-                    styles.customSendButton,
-                    pressed && { opacity: 0.8 }
-                  ]}
-                >
-                  <MaterialCommunityIcons name="send" size={12} color={palette.primary} />
-                  <Text style={styles.customSendButtonText}>Send</Text>
-                </Pressable>
+        <Reanimated.View entering={FadeInDown.delay(100).duration(400)}>
+          <Surface style={styles.remindersCard} elevation={0}>
+            <View style={styles.remindersHeader}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <MaterialCommunityIcons name="clock-alert-outline" size={20} color={palette.warning} />
+                <Text variant="titleMedium" style={styles.bold}>Due Reminders</Text>
               </View>
-            ))}
-          </View>
-        </Surface>
+              <Text style={styles.reminderCount}>{dueDebts.length} pending</Text>
+            </View>
+            <View style={styles.remindersList}>
+              {dueDebts.map((debt) => (
+                <View key={debt.id} style={styles.reminderItem}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.bold, { color: palette.text, fontSize: 14 }]}>{debt.personName}</Text>
+                    <Text style={styles.mutedSmall}>
+                      {debt.type === "lend" ? "You Lent" : "You Borrowed"} • {currency(debt.remainingAmount)} remaining
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => handleSendReminderClick(debt)}
+                    style={({ pressed }) => [
+                      styles.customSendButton,
+                      pressed && { opacity: 0.8 }
+                    ]}
+                  >
+                    <MaterialCommunityIcons name="send" size={12} color={palette.primary} />
+                    <Text style={styles.customSendButtonText}>Send</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          </Surface>
+        </Reanimated.View>
       )}
 
-      <Surface style={styles.budget} elevation={0}>
-        <View style={styles.row}>
-          <View>
-            <Text variant="titleMedium" style={{ color: palette.text }}>Monthly budget</Text>
-            <Text style={styles.muted}>
-              {currency(budget.data?.spent ?? 0)} of{" "}
-              {currency(budget.data?.budget ?? 0)}
-            </Text>
-          </View>
-          <Text style={{ color: palette.warning }}>
-            {currency(budget.data?.remaining ?? 0)} left
-          </Text>
-        </View>
-        <View style={styles.track}>
-          <View style={[styles.fill, { width: `${budgetProgress * 100}%` }]} />
-        </View>
-      </Surface>
+      {/* Monthly Budget Widget */}
+      <Reanimated.View entering={FadeInDown.delay(200).duration(400)}>
+        <Pressable
+          onPress={() => router.push("/reports")}
+          style={({ pressed }) => pressed && { opacity: 0.95, transform: [{ scale: 0.99 }] }}
+        >
+          <Surface style={styles.budget} elevation={0}>
+            <View style={styles.row}>
+              <View>
+                <Text variant="titleMedium" style={[styles.bold, { color: palette.text }]}>Monthly budget</Text>
+                <Text style={styles.muted}>
+                  {currency(budget.data?.spent ?? 0)} of{" "}
+                  {currency(budget.data?.budget ?? 0)}
+                </Text>
+              </View>
+              <Text style={{ color: palette.warning, fontWeight: '700' }}>
+                {currency(budget.data?.remaining ?? 0)} left
+              </Text>
+            </View>
+            <View style={styles.track}>
+              <Reanimated.View style={[styles.fill, progressStyle]} />
+            </View>
+          </Surface>
+        </Pressable>
+      </Reanimated.View>
+
       <View style={styles.sectionTitle}>
         <Text variant="titleLarge" style={[styles.bold, { color: palette.text }]}>
           Transactions
@@ -271,8 +304,12 @@ export default function HomeScreen() {
       ) : Object.keys(grouped).length === 0 ? (
         <EmptyState text="No transactions yet. Add your first one." />
       ) : (
-        Object.entries(grouped).map(([date, items]) => (
-          <View key={date} style={styles.group}>
+        Object.entries(grouped).map(([date, items], idx) => (
+          <Reanimated.View
+            key={date}
+            entering={FadeInDown.delay(300 + idx * 50).duration(400)}
+            style={styles.group}
+          >
             <Text style={styles.date}>
               {new Date(`${date}T12:00:00`).toLocaleDateString("en-IN", {
                 day: "numeric",
@@ -288,7 +325,7 @@ export default function HomeScreen() {
                 onDelete={handleDelete}
               />
             ))}
-          </View>
+          </Reanimated.View>
         ))
       )}
       <AlertComponent />
@@ -302,6 +339,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
+  profileButton: {
+    padding: 4,
+  },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -310,17 +350,24 @@ const styles = StyleSheet.create({
   budget: {
     padding: 18,
     borderRadius: 18,
-    backgroundColor: palette.surface,
+    backgroundColor: palette.card,
     gap: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   muted: { color: palette.muted },
   track: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: palette.surfaceAlt,
+    backgroundColor: palette.surface,
     overflow: "hidden",
   },
-  fill: { height: 8, borderRadius: 4, backgroundColor: palette.warning },
+  fill: { height: 8, borderRadius: 4, backgroundColor: palette.primary },
   sectionTitle: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -333,23 +380,23 @@ const styles = StyleSheet.create({
   date: {
     color: palette.muted,
     marginTop: 12,
-    marginBottom: 4,
+    marginBottom: 8,
     fontWeight: "600",
-  },
-  fab: {
-    position: "absolute",
-    right: 22,
-    bottom: 94,
-    backgroundColor: palette.primary,
+    fontSize: 13,
   },
   remindersCard: {
     padding: 16,
     borderRadius: 18,
-    backgroundColor: palette.surface,
+    backgroundColor: palette.card,
     gap: 10,
-    marginVertical: 12,
+    marginVertical: 14,
     borderWidth: 1,
-    borderColor: palette.border,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   remindersHeader: {
     flexDirection: "row",
@@ -368,9 +415,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: palette.surfaceAlt,
-    padding: 10,
-    borderRadius: 12,
+    backgroundColor: palette.surface,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.04)",
   },
   mutedSmall: {
     color: palette.muted,

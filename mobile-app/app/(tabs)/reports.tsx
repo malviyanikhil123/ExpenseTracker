@@ -1,17 +1,22 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { useCallback, useState, useEffect } from "react";
+import { StyleSheet, View, Pressable } from "react-native";
 import {
   Button,
   Dialog,
-  FAB,
   Portal,
-  ProgressBar,
   Surface,
   Text,
   TextInput,
 } from "react-native-paper";
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  FadeInDown,
+} from "react-native-reanimated";
 
 import {
   useAccounts,
@@ -21,10 +26,61 @@ import {
   useSummary,
   useTransactions,
 } from "@/api/queries";
-import { PageHeader, SummaryCards } from "@/components/finance-ui";
+import { PageHeader, SummaryCards, FloatingFAB } from "@/components/finance-ui";
 import { Screen } from "@/components/screen";
 import { palette } from "@/constants/app-theme";
 import { currency } from "@/lib/format";
+
+function AnimatedProgressBar({ percent, color }: { percent: number; color: string }) {
+  const widthShared = useSharedValue(0);
+  useEffect(() => {
+    widthShared.value = withTiming(percent, { duration: 600 });
+  }, [percent, widthShared]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: `${widthShared.value}%`,
+  }));
+
+  return <Reanimated.View style={[styles.fill, animatedStyle, { backgroundColor: color }]} />;
+}
+
+function AccountCard({ account, count, index }: { account: any; count: number; index: number }) {
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.97, { damping: 15 });
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1, { damping: 15 });
+  };
+
+  return (
+    <Reanimated.View
+      entering={FadeInDown.delay(100 * index).duration(400)}
+      style={[animatedStyle, { marginBottom: 10 }]}
+    >
+      <Pressable
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Surface style={[styles.card, styles.account, { marginBottom: 0 }]} elevation={0}>
+          <View>
+            <Text variant="titleMedium" style={[styles.bold, { color: palette.text }]}>{account.name}</Text>
+            <Text style={styles.muted}>{count} transactions this month</Text>
+          </View>
+          <Text variant="titleMedium" style={{ color: palette.primary, fontWeight: '700' }}>
+            {currency(account.balance)}
+          </Text>
+        </Surface>
+      </Pressable>
+    </Reanimated.View>
+  );
+}
 
 export default function ReportsScreen() {
   const router = useRouter();
@@ -50,28 +106,30 @@ export default function ReportsScreen() {
     await queryClient.invalidateQueries();
     setRefreshing(false);
   }, [queryClient]);
+
+  const budgetPercent = budget.data?.budget
+    ? Math.min((budget.data.spent / budget.data.budget) * 100, 100)
+    : 0;
+
   return (
     <Screen
       refreshing={refreshing}
       onRefresh={onRefresh}
-      fixed={
-        <FAB
-          icon="plus"
-          style={styles.fab}
-          onPress={() => router.push("/add-transaction")}
-        />
-      }
+      fixed={<FloatingFAB onPress={() => router.push("/add-transaction")} />}
     >
       <PageHeader
         title="Reports"
         subtitle="Monthly statistics and account health"
       />
       <SummaryCards data={summary.data} />
+      
       <View style={styles.headingRow}>
         <Text variant="titleLarge" style={styles.heading}>
           Budget status
         </Text>
         <Button
+          textColor={palette.primary}
+          labelStyle={{ fontWeight: '700' }}
           onPress={() => {
             setValue(String(budget.data?.budget || ""));
             setDialog("budget");
@@ -80,32 +138,33 @@ export default function ReportsScreen() {
           Edit
         </Button>
       </View>
-      <Surface style={styles.card} elevation={0}>
-        <View style={styles.row}>
-          <Text style={{ color: palette.text }}>Spent</Text>
-          <Text style={{ color: palette.text }}>
-            {currency(budget.data?.spent ?? 0)} /{" "}
-            {currency(budget.data?.budget ?? 0)}
+      
+      <Reanimated.View entering={FadeInDown.delay(100).duration(400)}>
+        <Surface style={styles.card} elevation={0}>
+          <View style={styles.row}>
+            <Text style={{ color: palette.text, fontWeight: '500' }}>Spent</Text>
+            <Text style={{ color: palette.text, fontWeight: '700' }}>
+              {currency(budget.data?.spent ?? 0)} /{" "}
+              {currency(budget.data?.budget ?? 0)}
+            </Text>
+          </View>
+          <View style={styles.track}>
+            <AnimatedProgressBar percent={budgetPercent} color={palette.warning} />
+          </View>
+          <Text style={styles.muted}>
+            {currency(budget.data?.remaining ?? 0)} remaining
           </Text>
-        </View>
-        <ProgressBar
-          progress={
-            budget.data?.budget
-              ? Math.min(budget.data.spent / budget.data.budget, 1)
-              : 0
-          }
-          color={palette.warning}
-        />
-        <Text style={styles.muted}>
-          {currency(budget.data?.remaining ?? 0)} remaining
-        </Text>
-      </Surface>
+        </Surface>
+      </Reanimated.View>
+
       <View style={styles.headingRow}>
         <Text variant="titleLarge" style={styles.heading}>
           Accounts
         </Text>
         <Button
           icon="plus"
+          textColor={palette.primary}
+          labelStyle={{ fontWeight: '700' }}
           onPress={() => {
             setName("");
             setValue("0");
@@ -115,7 +174,8 @@ export default function ReportsScreen() {
           Add
         </Button>
       </View>
-      {(accounts.data ?? []).map((account) => {
+
+      {(accounts.data ?? []).map((account, index) => {
         const count =
           transactions.data?.items.filter((item) =>
             [item.accountId, item.fromAccountId, item.toAccountId].includes(
@@ -123,59 +183,70 @@ export default function ReportsScreen() {
             ),
           ).length ?? 0;
         return (
-          <Surface
+          <AccountCard
             key={account.id}
-            style={[styles.card, styles.account]}
-            elevation={0}
-          >
-            <View>
-              <Text variant="titleMedium" style={{ color: palette.text }}>{account.name}</Text>
-              <Text style={styles.muted}>{count} transactions this month</Text>
-            </View>
-            <Text variant="titleMedium" style={{ color: palette.primary }}>
-              {currency(account.balance)}
-            </Text>
-          </Surface>
+            account={account}
+            count={count}
+            index={index}
+          />
         );
       })}
+
       <Portal>
         <Dialog visible={!!dialog} onDismiss={() => setDialog(undefined)} style={styles.dialogContainer}>
           {dialog && (
             <View>
-              <Dialog.Title style={styles.bold}>
-                {dialog === "account" ? "Add account" : "Set monthly budget"}
+              <Dialog.Title style={styles.dialogTitle}>
+                {dialog === "account" ? "Add Account" : "Set Monthly Budget"}
               </Dialog.Title>
               <Dialog.Content style={styles.dialogContent}>
                 {dialog === "account" ? (
                   <View style={{ gap: 12 }}>
                     <TextInput
                       mode="outlined"
-                      label="Account name"
+                      label="Account Name"
+                      textColor={palette.text}
+                      activeOutlineColor={palette.primary}
+                      outlineColor={palette.border}
+                      placeholderTextColor={palette.muted}
                       value={name}
                       onChangeText={setName}
+                      style={styles.textInput}
                     />
                     <TextInput
                       mode="outlined"
-                      label="Opening balance"
+                      label="Opening Balance"
                       keyboardType="decimal-pad"
+                      textColor={palette.text}
+                      activeOutlineColor={palette.primary}
+                      outlineColor={palette.border}
+                      placeholderTextColor={palette.muted}
                       value={value}
                       onChangeText={setValue}
+                      style={styles.textInput}
                     />
                   </View>
                 ) : (
                   <TextInput
                     mode="outlined"
-                    label="Budget amount"
+                    label="Budget Amount"
                     keyboardType="decimal-pad"
+                    textColor={palette.text}
+                    activeOutlineColor={palette.primary}
+                    outlineColor={palette.border}
+                    placeholderTextColor={palette.muted}
                     value={value}
                     onChangeText={setValue}
+                    style={styles.textInput}
                   />
                 )}
               </Dialog.Content>
               <View style={styles.dialogActions}>
-                <Button onPress={() => setDialog(undefined)}>Cancel</Button>
+                <Button textColor={palette.muted} onPress={() => setDialog(undefined)}>Cancel</Button>
                 <Button
                   mode="contained"
+                  buttonColor={palette.primary}
+                  textColor={palette.textDark}
                   disabled={
                     Number(value) < 0 || (dialog === "account" && !name.trim())
                   }
@@ -190,6 +261,7 @@ export default function ReportsScreen() {
                     else await setBudget.mutateAsync(Number(value));
                     setDialog(undefined);
                   }}
+                  style={{ borderRadius: 12 }}
                 >
                   Save
                 </Button>
@@ -201,19 +273,27 @@ export default function ReportsScreen() {
     </Screen>
   );
 }
+
 const styles = StyleSheet.create({
-  heading: { fontWeight: "700", marginTop: 24, marginBottom: 12 },
+  heading: { fontWeight: "700", marginTop: 24, marginBottom: 12, color: palette.text },
   headingRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   card: {
-    backgroundColor: palette.surface,
+    backgroundColor: palette.card,
     borderRadius: 18,
     padding: 18,
     gap: 14,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   row: { flexDirection: "row", justifyContent: "space-between" },
   account: {
@@ -221,16 +301,35 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  muted: { color: palette.muted },
-  dialog: { gap: 12 },
-  fab: {
-    position: "absolute",
-    right: 22,
-    bottom: 94,
-    backgroundColor: palette.primary,
+  muted: { color: palette.muted, fontSize: 12 },
+  track: {
+    height: 8,
+    backgroundColor: palette.surface,
+    borderRadius: 4,
+    overflow: "hidden",
   },
-  dialogContainer: { backgroundColor: palette.surfaceElevated, borderRadius: 20 },
-  dialogActions: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, paddingBottom: 16, gap: 8 },
-  dialogContent: { gap: 12 },
+  fill: { height: 8, borderRadius: 4 },
+  dialogContainer: {
+    backgroundColor: palette.surfaceElevated,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  dialogTitle: {
+    fontWeight: "800",
+    color: palette.text,
+    fontSize: 20,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  dialogContent: { gap: 12, paddingHorizontal: 24 },
   bold: { fontWeight: "700" },
+  textInput: {
+    backgroundColor: palette.surface,
+  },
 });

@@ -3,8 +3,6 @@ import Constants from 'expo-constants';
 
 import { useAuthStore } from '@/stores/auth-store';
 import type { AuthResponse } from '@/types';
-import { webStorage } from '@/lib/web-storage';
-import * as SecureStore from 'expo-secure-store';
 
 export const API_BASE_URL =
   Constants.expoConfig?.extra?.apiUrl ??
@@ -12,8 +10,6 @@ export const API_BASE_URL =
   'http://10.0.2.2:15000/api';
 
 export const api = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
-
-const storage = typeof window !== 'undefined' ? webStorage : SecureStore;
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;

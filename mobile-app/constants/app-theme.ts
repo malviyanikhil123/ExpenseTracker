@@ -6,6 +6,7 @@ export const palette = {
   surface: colors.surface,
   surfaceAlt: colors.surfaceSecondary,
   surfaceElevated: colors.surfaceElevated,
+  card: colors.card,
   primary: colors.primary,
   primarySoft: colors.primarySoft,
   secondary: colors.secondary,

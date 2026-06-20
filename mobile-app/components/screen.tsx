@@ -49,5 +49,5 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: palette.background },
   scroll: { flexGrow: 1 },
   contentScroll: { paddingHorizontal: 20, paddingBottom: 130 },
-  contentFixed: { flex: 1, paddingHorizontal: 20, paddingBottom: 20 },
+  contentFixed: { flex: 1, paddingHorizontal: 20, paddingBottom: 100 },
 });

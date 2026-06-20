@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 
 import { webStorage } from '@/lib/web-storage';
@@ -9,7 +10,7 @@ const REFRESH_TOKEN = 'expense_refresh_token';
 const USER = 'expense_user';
 
 // Use localStorage on web, SecureStore on mobile
-const storage = typeof window !== 'undefined' ? webStorage : SecureStore;
+const storage = Platform.OS === 'web' ? webStorage : SecureStore;
 
 type AuthState = {
   user: User | null;
